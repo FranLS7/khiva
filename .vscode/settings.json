@@ -86,7 +86,12 @@
         "xtr1common": "cpp",
         "xtree": "cpp",
         "xutility": "cpp",
-        "__string": "cpp"
+        "__string": "cpp",
+        "core": "cpp",
+        "clocale": "cpp",
+        "*.tcc": "cpp",
+        "optional": "cpp",
+        "cinttypes": "cpp"
     },
     "files.eol": "\n",
     "clang-format.style": "{BasedOnStyle: Google, ColumnLimit: 120, IndentWidth: 4, DerivePointerAlignment: false, PointerAlignment: Right}",

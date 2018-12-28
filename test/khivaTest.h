@@ -37,7 +37,7 @@
             int devices = (CUDADEVICES) ? af::getDeviceCount() : 1;                                              \
             for (int i = 0; i < devices; i++) {                                                                  \
                 af::setDevice(i);                                                                                \
-                std::cout << "[----------] CUDA backend, device: ";                                              \
+                std::cout << "\033[32m[----------]\033[0m CUDA backend, device: ";                               \
                 char name[100], platform[100], toolkit[100], compute[100];                                       \
                 af::deviceInfo(name, platform, toolkit, compute);                                                \
                 std::cout << name << std::endl;                                                                  \
