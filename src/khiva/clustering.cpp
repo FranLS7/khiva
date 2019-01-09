@@ -29,32 +29,41 @@ af::array matrixNorm(af::array x, int axis = 0) {  // for 2 dimensional matrix
  */
 void ncc2Dim(af::array x, af::array y, af::array &correlation, af::array &maxIndex) {
     af::array den = af::matmul(matrixNorm(x, 0).T(), matrixNorm(y, 0));
-
     af::array conv = af::constant(0, 2 * x.dims(0) - 1, x.dims(1));
 
     for (unsigned int i = 0; i < static_cast<unsigned int>(x.dims(1)); i++) {  // TODO gfor en vez de for
         conv.col(i) = af::convolve(x.col(i), af::flip(y, 0), AF_CONV_EXPAND) / (den(i).scalar<float>());
     }
+    conv = af::flip(conv, 0);
     af::max(correlation, maxIndex, conv, 0);
 }
 
+/**
+ * 'x'........: signals compared against 'y'
+ * 'y'........: reference signal
+ * 'distance'.: output argument containing the distance between signals
+ * 'xShifted'.: 'x' signal shifted in order to obtain minimal distance
+ */
 void sbdPrivate(af::array x, af::array y, af::array &distance, af::array &xShifted) {
     af::array correlation;
     af::array index;
 
     xShifted = af::constant(0, x.dims(), x.type());
     ncc2Dim(x, y, correlation, index);
+
     distance = 1 - correlation;
+
     af::array shift = index - x.dims(0) + 1;
-    float yLength = static_cast<float>(y.dims(0));
-    for (unsigned int i = 0; i < static_cast<float>(x.dims(1)); i++) {
+    af_print(shift);
+    float xLength = static_cast<float>(x.dims(0));
+    for (int i = 0; i < static_cast<int>(x.dims(1)); i++) {
         if (shift(i).scalar<int>() >= 0) {
-            xShifted.col(i) = af::join(0, af::constant(0, shift(i).scalar<float>()),
-                                       y(af::range(yLength - shift(i).scalar<float>()), 0));
-        } else
             xShifted.col(i) =
-                af::join(0, y(af::range(yLength + shift(i).scalar<float>()), 0) + shift(i).scalar<float>(),
-                         af::constant(0, -shift(i).scalar<float>()));
+                af::join(0, af::constant(0, shift(i).scalar<int>()), x(af::range(xLength - shift(i).scalar<int>()), 0));
+        } else {
+            xShifted.col(i) = af::join(0, x(af::range(xLength + shift(i).scalar<int>()) - shift(i).scalar<int>(), 0),
+                                       af::constant(0, -shift(i).scalar<int>()));
+        }
     }
 }
 
@@ -84,7 +93,11 @@ af::array eigenVectors(af::array matrix) {
     Eigen::MatrixXf mat = Eigen::Map<Eigen::MatrixXf>(matHost, matrix.dims(0), matrix.dims(1));
 
     Eigen::EigenSolver<Eigen::MatrixXf> solution(mat);
-    return af::array(matrix.dims(0), matrix.dims(1), solution.eigenvectors().real().data());
+
+    Eigen::MatrixXf re;
+    re = solution.eigenvectors().real();
+
+    return af::array(matrix.dims(0), matrix.dims(1), re.data());
 }
 
 af::array eigenValues(af::array matrix) {
@@ -92,7 +105,9 @@ af::array eigenValues(af::array matrix) {
     Eigen::MatrixXf mat = Eigen::Map<Eigen::MatrixXf>(matHost, matrix.dims(0), matrix.dims(1));
 
     Eigen::VectorXcf eivals = mat.eigenvalues();
-    return af::array(matrix.dims(0), eivals.real().data());
+
+    Eigen::VectorXf re = eivals.real();
+    return af::array(matrix.dims(0), re.data());
 }
 
 /**
@@ -102,36 +117,50 @@ af::array eigenValues(af::array matrix) {
  * 'currentCentroid'.: 1D Array containing the centroid we want to recalculate
  */
 af::array extractShape(af::array idx, af::array x, af::array centroids) {
-    af::array optX;
-    af::array result = af::constant(0.0, centroids.dims());
+    af::array xShifted;
+    af::array result = af::constant(0.0, centroids.dims(), af::dtype::f32);
     af::array distance;
 
-    for (unsigned int i = 0; i < static_cast<unsigned int>(centroids.dims(1)); i++) {
+    for (int i = 0; i < static_cast<int>(centroids.dims(1)); i++) {
+        std::cout << "/****************CÁLCULO CENTROIDE " << i << "********************/" << std::endl;
         af::array a;
-        for (unsigned int j = 0; j < static_cast<unsigned int>(idx.dims(0)); j++) {
-            if (af::allTrue(af::iszero(centroids.col(i))).scalar<char>()) {
-                optX = x.col(i);
-            } else {
-                sbdPrivate(x.col(i), centroids.col(i), distance, optX);
+        for (int j = 0; j < static_cast<int>(idx.dims(0)); j++) {
+            if (idx(j).scalar<int>() == i) {
+                if (af::allTrue(af::iszero(centroids.col(i))).scalar<char>()) {
+                    xShifted = x.col(j);
+                } else {
+                    sbdPrivate(x.col(j), centroids.col(i), distance, xShifted);
+                    af_print(distance);
+                }
+                a = af::join(1, a, xShifted);
             }
-            a = af::join(1, a, optX);
         }
-        af_print(a);
         if (a.isempty()) {
             result.col(i) = af::constant(0, static_cast<unsigned int>(x.dims(0)));
             continue;
         }
-
-        int columns = static_cast<unsigned int>(a.dims(0));
+        af_print(a);
+        int matrixSize = static_cast<unsigned int>(a.dims(0));
         af::array y = khiva::normalization::znorm(a);
-        af::array s = af::matmul(y, y.T());
+        af::array S = af::matmul(y, y.T());
 
-        af::array p = af::constant(1.0 / columns, columns, columns, x.type());
-        af::array diagonal = af::constant(1, columns, x.type());
-        p = af::diag(diagonal, 0, false) - p;
+        af::array Q = af::constant(1.0 / matrixSize, matrixSize, matrixSize, x.type());
+        af::array diagonal = af::constant(1, matrixSize, x.type());
+        Q = af::diag(diagonal, 0, false) - Q;
 
-        af::array m = af::matmul(af::matmul(p, s), p);  // P*S*P
-        result.col(i) = eigenVectors(m).col(af::end);   // highest order eigenvector
+        af::array M = af::matmul(af::matmul(Q, S), Q);  // Q_T*S*Q. Q is a simmetric matrix
+        af::array eigenvalues = eigenValues(M);
+        af::array maxEigenValue;
+        af::array indMaxEigenValue;
+        af::max(maxEigenValue, indMaxEigenValue, eigenvalues, 0);
+        result.col(i) = eigenVectors(M).col(indMaxEigenValue(0).scalar<int>());  // highest order eigenvector
+
+        // delete these lines
+        af_print(eigenvalues);
+        af_print(M);
+        af_print(eigenVectors(M));
+        af_print(maxEigenValue);
+        af_print(indMaxEigenValue);
 
         float findDistance1 = af::sqrt(af::sum(af::pow((a(af::span, 0) - result.col(i)), 2))).scalar<float>();
         float findDistance2 = af::sqrt(af::sum(af::pow((a(af::span, 0) + result.col(i)), 2))).scalar<float>();
@@ -140,6 +169,8 @@ af::array extractShape(af::array idx, af::array x, af::array centroids) {
             result.col(i) = khiva::normalization::znorm(result.col(i) * (-1));
         else
             result.col(i) = khiva::normalization::znorm(result.col(i));
+        af_print(result.col(i));
+        getchar();
     }
     return result;
 }
@@ -151,7 +182,7 @@ float computeError(af::array centroids, af::array newCentroids) {
 }
 
 void khiva::clustering::kShape(af::array tss, int k, float tolerance, af::array &idx,
-                               af::array &centroids) {  // tolerance
+                               af::array &centroids) {  // TODO: include tolerance
 
     unsigned int nTimeSeries = static_cast<unsigned int>(tss.dims(1));  // number of signals in 'x'
 
@@ -160,8 +191,16 @@ void khiva::clustering::kShape(af::array tss, int k, float tolerance, af::array 
     }
 
     if (idx.isempty()) {
-        idx = af::floor(af::randu(nTimeSeries) * k);  // assigns a random centroid to every signal in 'x'
+        idx = af::floor(af::randu(nTimeSeries) * (k)).as(af::dtype::s32);
+        // assigns a random centroid to every signal in 'x'
     }
+
+    // TODO: NORMALIZATION (change name in other calls)
+    // af::array normalizedTss = khiva::normalization::znorm(tss);
+
+    // Delete these both lines
+    int ar[5] = {1, 0, 0, 1, 0};
+    idx = af::array(5, ar);
 
     af::array oldIdx = idx;
     af::array min = af::constant(0, tss.dims(1));  // used to storage the minimum values
@@ -174,24 +213,32 @@ void khiva::clustering::kShape(af::array tss, int k, float tolerance, af::array 
     int iter = 0;
 
     af_print(tss);
-    af_print(centroids);
     af_print(idx);
 
     while (error > tolerance) {
-        /*af_print(centroids);
-        af_print(idx);*/
+        std::cout << "/****************************NEW ITERATION****************************/" << std::endl;
+        std::cout << iter++ << std::endl;
+
         oldIdx = idx;
 
         newCentroids = extractShape(idx, tss, centroids);
 
         error = computeError(centroids, newCentroids);
 
-        distances = af::max((1 - ncc3Dim(tss, newCentroids)), 2);
+        distances = 1 - af::max(ncc3Dim(tss, newCentroids), 2);
+        af_print(distances);
         centroids = newCentroids;
 
         af::min(min, idx, distances, 0);
         idx = idx.T();
-        std::cout << iter++ << std::endl;
-        // af_print(newCentroids);
+
+        af_print(idx);
+        af_print(newCentroids);
+        getchar();
+        /*af_print(idx);
+        af_print(oldIdx);*/
+
+        // if ((idx == oldIdx).scalar<char>()) break;
+        // std::cin >> c;
     }
 }

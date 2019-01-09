@@ -6,10 +6,21 @@
 
 #include <arrayfire.h>
 
-namespace khiva {
+namespace khiva
+{
 
-namespace clustering {
+namespace clustering
+{
 
+/**
+ * @brief Calculates the k-shape algorithm.
+ *
+ * @param tss Expects an input array whose dimension zero is the length of the time series (all the same) and
+ * dimension one indicates the number of time series.
+ * @param k The number of means to be computed.
+ * @param centroids The resulting means or centroids.
+ * @param idx The resulting labels of each time series which is the closest centroid.
+ */
 void kShape(af::array tss, int k, float tolerance, af::array &idx, af::array &centroids);
-}  // namespace clustering
-}  // namespace khiva
+} // namespace clustering
+} // namespace khiva
