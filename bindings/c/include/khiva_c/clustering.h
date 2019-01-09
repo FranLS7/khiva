@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 /**
- * @brief Calculates the clusterization based on SBD
+ * @brief Calculates the clusterization based on SBD.
  *
  * @param tss Expects a 2D-Array of Time-Series.
  * @param k Is the number of clusters that will be calculated. Must be an integer number
